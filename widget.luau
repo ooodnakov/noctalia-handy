@@ -35,7 +35,7 @@ local function render(value)
 
   if snapshot == nil then
     barWidget.setGlyph("microphone")
-    barWidget.setGlyphColor("outline")
+    barWidget.setGlyphColor("on_surface_variant")
     barWidget.setText("")
     barWidget.setTooltip(translated("state.unavailable", "Unavailable"))
     return
@@ -51,7 +51,7 @@ local function render(value)
 
   if not snapshot.running then
     barWidget.setGlyph("microphone-off")
-    barWidget.setGlyphColor("outline")
+    barWidget.setGlyphColor("on_surface_variant")
     barWidget.setText(showStateText and "OFF" or "")
     barWidget.setTooltip(translated("widget.offline", "Handy is not running — click to launch"))
     return

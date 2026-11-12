@@ -39,6 +39,7 @@ local lastCommandNonce = nil
 local lastLoggedError = nil
 local lastLogState = nil
 local lastLogStateAt = 0
+local deletingTranscript = false
 local modelsPending = false
 local lastModelFetch = 0
 local modelRefreshAt = 0
@@ -376,7 +377,7 @@ end
 local function selectModel(name)
   fetchTrayMenu(function(menu)
     if menu == nil then
-      noctalia.notifyError("Handy", translated("errors.trayUnavailable", "Handy tray menu is unavailable"))
+      noctalia.notifyError("Handy", translated("errors.tray_unavailable", "Handy tray menu is unavailable"))
       return
     end
 
@@ -388,7 +389,7 @@ local function selectModel(name)
       end
     end
     if target == nil then
-      noctalia.notifyError("Handy", translated("errors.modelNotFound", "Model not found in Handy's menu"))
+      noctalia.notifyError("Handy", translated("errors.model_not_found", "Model not found in Handy's menu"))
       return
     end
     if target.active then
@@ -400,13 +401,13 @@ local function selectModel(name)
       "int32:" .. tostring(target.id), "string:clicked", "variant:int32:0", "uint32:0",
     }, function(result)
       if result.exitCode ~= 0 then
-        noctalia.notifyError("Handy", translated("errors.trayUnavailable", "Handy tray menu is unavailable"))
+        noctalia.notifyError("Handy", translated("errors.tray_unavailable", "Handy tray menu is unavailable"))
       end
       poll()
       modelRefreshAt = os.time() + 2
     end)
     if not accepted then
-      noctalia.notifyError("Handy", translated("errors.trayUnavailable", "Handy tray menu is unavailable"))
+      noctalia.notifyError("Handy", translated("errors.tray_unavailable", "Handy tray menu is unavailable"))
       return
     end
     noctalia.notify("Handy", translated("notify.switching", "Switching model to {model}", { model = name }))
@@ -487,11 +488,11 @@ local function apply(_id, result)
   snapshot.state = state
 
   if not handyExists then
-    snapshot.error = translated("errors.handyMissing", "The handy command was not found")
+    snapshot.error = translated("errors.handy_missing", "The handy command was not found")
   elseif result.historyError ~= nil then
     snapshot.error = result.historyError
   elseif not dirExists then
-    snapshot.error = translated("errors.dataDirMissing", "Handy data directory not found")
+    snapshot.error = translated("errors.data_dir_missing", "Handy data directory not found")
   else
     snapshot.error = nil
   end
@@ -580,7 +581,7 @@ poll = function()
     result.history = {}
     finish()
   elseif not noctalia.commandExists("sqlite3") then
-    result.historyError = translated("errors.sqliteMissing", "sqlite3 was not found")
+    result.historyError = translated("errors.sqlite_missing", "sqlite3 was not found")
     finish()
   elseif dbStamp ~= nil and dbStamp.mtime == dbInfo.mtime and dbStamp.size == dbInfo.size then
     finish()
@@ -621,7 +622,7 @@ local function runHandy(args, label)
   local accepted = noctalia.runAsync(args, function(r)
     if r.exitCode ~= 0 then
       local details = elide(r.stderr)
-      local message = translated("errors.commandFailed", "Handy command failed", { command = label })
+      local message = translated("errors.command_failed", "Handy command failed", { command = label })
       if details ~= "" then
         message = message .. ": " .. details
       end
@@ -631,16 +632,106 @@ local function runHandy(args, label)
     poll()
   end)
   if not accepted then
-    noctalia.notifyError("Handy", translated("errors.handyMissing", "The handy command was not found"))
+    noctalia.notifyError("Handy", translated("errors.handy_missing", "The handy command was not found"))
   end
 end
 
 local function launchHandy()
   if not commandAvailable(handyCommand) then
-    noctalia.notifyError("Handy", translated("errors.handyMissing", "The handy command was not found"))
+    noctalia.notifyError("Handy", translated("errors.handy_missing", "The handy command was not found"))
     return
   end
   noctalia.runAsync({ handyCommand, "--start-hidden" })
+end
+
+local function recordingFilePath(fileName)
+  if type(fileName) ~= "string" or fileName == "" then
+    return nil
+  end
+  if string.find(fileName, "/", 1, true)
+    or string.find(fileName, "\\", 1, true)
+    or string.find(fileName, "..", 1, true) then
+    return nil
+  end
+  return recordingsDir .. "/" .. fileName
+end
+
+local function deleteTranscript(id)
+  if deletingTranscript then
+    return
+  end
+  if not noctalia.commandExists("sqlite3") then
+    noctalia.notifyError("Handy", translated("errors.sqlite_missing", "sqlite3 was not found"))
+    return
+  end
+  if not noctalia.fileExists(dbPath) then
+    noctalia.notifyError("Handy", translated("errors.delete_failed", "Could not delete transcript"))
+    return
+  end
+
+  deletingTranscript = true
+  local selectSql = string.format("SELECT file_name FROM transcription_history WHERE id = %d LIMIT 1", id)
+  local accepted = noctalia.runAsync({ "sqlite3", "-json", dbPath, selectSql }, function(selectResult)
+    if selectResult.exitCode ~= 0 then
+      deletingTranscript = false
+      local details = elide(selectResult.stderr)
+      local message = translated("errors.delete_failed", "Could not delete transcript")
+      if details ~= "" then
+        message = message .. ": " .. details
+      end
+      log(message)
+      noctalia.notifyError("Handy", message)
+      return
+    end
+
+    local decoded = noctalia.json.decode(selectResult.stdout or "")
+    local fileName = nil
+    if type(decoded) == "table" and type(decoded[1]) == "table" then
+      fileName = decoded[1].file_name
+    end
+    if type(fileName) ~= "string" or fileName == "" then
+      deletingTranscript = false
+      noctalia.notifyError("Handy", translated("errors.delete_failed", "Could not delete transcript"))
+      return
+    end
+
+    local deleteSql = string.format(
+      "PRAGMA busy_timeout=2000; DELETE FROM transcription_history WHERE id = %d",
+      id
+    )
+    local deleteAccepted = noctalia.runAsync({ "sqlite3", dbPath, deleteSql }, function(deleteResult)
+      deletingTranscript = false
+      if deleteResult.exitCode ~= 0 then
+        local details = elide(deleteResult.stderr)
+        local message = translated("errors.delete_failed", "Could not delete transcript")
+        if details ~= "" then
+          message = message .. ": " .. details
+        end
+        log(message)
+        noctalia.notifyError("Handy", message)
+        return
+      end
+
+      local path = recordingFilePath(fileName)
+      if path ~= nil and noctalia.fileExists(path) then
+        local removed, removeError = noctalia.removeFile(path)
+        if not removed then
+          log("could not remove recording file: " .. tostring(removeError))
+        end
+      end
+
+      dbStamp = nil
+      poll()
+    end)
+    if not deleteAccepted then
+      deletingTranscript = false
+      noctalia.notifyError("Handy", translated("errors.delete_failed", "Could not delete transcript"))
+    end
+  end)
+  if not accepted then
+    deletingTranscript = false
+    noctalia.notifyError("Handy", translated("errors.delete_failed", "Could not delete transcript"))
+  end
 end
 
 local function handleCommand(command)
@@ -655,7 +746,7 @@ local function handleCommand(command)
     if snapshot.running then
       runHandy({ handyCommand, "--toggle-post-process" }, "toggle post-processing")
     else
-      noctalia.notifyError("Handy", translated("errors.notRunning", "Handy is not running"))
+      noctalia.notifyError("Handy", translated("errors.not_running", "Handy is not running"))
     end
   elseif action == "cancel" then
     if snapshot.running then
@@ -673,16 +764,21 @@ local function handleCommand(command)
     if type(name) == "string" and name ~= "" then
       selectModel(name)
     end
+  elseif action == "delete_transcript" then
+    local id = tonumber(command.id)
+    if id ~= nil and id >= 1 and id == math.floor(id) then
+      deleteTranscript(id)
+    end
   elseif action == "copy_latest" then
     local latest = snapshot.latest
     if latest == nil then
-      noctalia.notify("Handy", translated("panel.noTranscripts", "No transcripts yet"))
+      noctalia.notify("Handy", translated("panel.no_transcripts", "No transcripts yet"))
     else
       noctalia.copyToClipboard(latest.text, "text/plain")
     end
   elseif action == "open_recordings" then
     if not noctalia.commandExists("xdg-open") then
-      noctalia.notifyError("Handy", translated("errors.openFolder", "Could not open the recordings folder"))
+      noctalia.notifyError("Handy", translated("errors.open_folder", "Could not open the recordings folder"))
     else
       noctalia.runAsync({ "xdg-open", recordingsDir })
     end
@@ -735,6 +831,16 @@ function onConfigChanged()
 end
 
 function onIpc(event, payload)
+  if event == "delete_transcript" then
+    local id = tonumber(payload)
+    if id == nil and type(payload) == "table" then
+      id = tonumber(payload[1])
+    end
+    if id ~= nil and id >= 1 and id == math.floor(id) then
+      handleCommand({ action = "delete_transcript", id = id })
+    end
+    return
+  end
   if event == "select_model" then
     local name = payload
     if type(name) == "table" then

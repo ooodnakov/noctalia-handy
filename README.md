@@ -44,8 +44,9 @@ and a muted microphone when Handy is not running.
 
 The panel lists the newest transcripts with their timestamp and language.
 Click a transcript to copy it, search to filter, and use the toolbar to record,
-stop, cancel, copy the newest transcript, or open the recordings folder. When
-Handy is not running the primary button launches it.
+stop, cancel, copy the newest transcript, or open the recordings folder. Each
+row also has a trash button: click it twice to delete the transcript and its
+recording. When Handy is not running the primary button launches it.
 
 The **Model** row lists the models Handy reports as downloaded in its tray menu
 and marks the active one. Choosing another model activates the same tray-menu
@@ -76,6 +77,7 @@ noctalia msg plugin odnakov/handy:service all refresh
 noctalia msg plugin odnakov/handy:service all copy_latest
 noctalia msg plugin odnakov/handy:service all open_recordings
 noctalia msg plugin odnakov/handy:service all select_model "Parakeet Ultra"
+noctalia msg plugin odnakov/handy:service all delete_transcript 42
 ```
 
 `toggle` mirrors the bar click: it launches Handy when it is not running.

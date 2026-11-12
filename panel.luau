@@ -7,6 +7,7 @@ local open = false
 local commandCounter = 0
 local filterText = ""
 local copiedId = nil
+local pendingDeleteId = nil
 local transcriptLines = math.floor(tonumber(noctalia.getConfig("transcript_lines")) or 4)
 transcriptLines = math.max(1, math.min(10, transcriptLines))
 local render
@@ -49,6 +50,16 @@ local function copyEntry(entry)
   render()
 end
 
+local function deleteEntry(entry)
+  if pendingDeleteId == entry.id then
+    pendingDeleteId = nil
+    sendCommand("delete_transcript", { id = entry.id })
+  else
+    pendingDeleteId = entry.id
+  end
+  render()
+end
+
 local function matchesFilter(entry)
   if filterText == "" then
     return true
@@ -62,7 +73,7 @@ local function stateInfo(value)
   if value == nil then
     return {
       glyph = "loader",
-      color = "outline",
+      color = "on_surface_variant",
       text = translated("state.unavailable", "Unavailable"),
     }
   end
@@ -72,7 +83,7 @@ local function stateInfo(value)
   if not value.running then
     return {
       glyph = "microphone-off",
-      color = "outline",
+      color = "on_surface_variant",
       text = translated("panel.offline", "Handy is not running."),
     }
   end
@@ -161,7 +172,7 @@ local function actions(value)
 
   table.insert(children, ui.button({
     glyph = "folder",
-    tooltip = translated("panel.openRecordings", "Open recordings folder"),
+    tooltip = translated("panel.open_recordings", "Open recordings folder"),
     variant = "ghost",
     onClick = function()
       sendCommand("open_recordings")
@@ -191,7 +202,7 @@ local function modelRow(value)
       ui.glyph({ name = "cpu", size = 16, color = "on_surface_variant" }),
       ui.label({ text = translated("panel.model", "Model"), color = "on_surface_variant", fontSize = 12 }),
       ui.label({
-        text = (value and value.activeModel) or translated("panel.noModel", "No model selected"),
+        text = (value and value.activeModel) or translated("panel.no_model", "No model selected"),
         color = "on_surface_variant",
         fontSize = 12,
         flexGrow = 1,
@@ -250,10 +261,23 @@ local function entryRow(entry)
     end,
   }))
 
+  local confirming = pendingDeleteId == entry.id
+  table.insert(details, ui.button({
+    glyph = confirming and "check" or "trash",
+    tooltip = confirming
+      and translated("panel.delete_confirm", "Click again to delete")
+      or translated("panel.delete", "Delete transcript"),
+    controlSize = "sm",
+    variant = confirming and "destructive" or "ghost",
+    onClick = function()
+      deleteEntry(entry)
+    end,
+  }))
+
   return ui.column({
     key = "transcript-" .. tostring(entry.id),
     gap = 5,
-    fill = "surface_container/0.35",
+    fill = "on_surface/0.06",
     radius = 8,
     padding = 10,
     onClick = function()
@@ -284,9 +308,9 @@ local function body(value)
     elseif value.error ~= nil and #history == 0 then
       message = tostring(value.error)
     elseif #history > 0 and filterText ~= "" then
-      message = translated("panel.noMatches", "No transcripts match your search.")
+      message = translated("panel.no_matches", "No transcripts match your search.")
     else
-      message = translated("panel.noTranscripts", "No transcripts yet. Press the Handy shortcut or click Record.")
+      message = translated("panel.no_transcripts", "No transcripts yet. Press the Handy shortcut or click Record.")
     end
     table.insert(children, ui.label({ text = message, color = "on_surface_variant", maxLines = 4 }))
   end
@@ -304,7 +328,7 @@ local function footer(value)
       flexGrow = 1,
     }),
     ui.label({
-      text = translatedWith("panel.footerCount", tostring(total) .. " transcripts", { count = total }),
+      text = translatedWith("panel.footer_count", tostring(total) .. " transcripts", { count = total }),
       color = "on_surface_variant",
       fontSize = 11,
     }),
@@ -354,4 +378,5 @@ end
 
 function onClose()
   open = false
+  pendingDeleteId = nil
 end
